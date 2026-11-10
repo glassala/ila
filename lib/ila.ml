@@ -15,13 +15,18 @@ type tm =
     | Lam of tm
     | App of tm * tm
 (*
-    Index-shifting function. Handles free variables.
+    Index-shifting function.
 *)
 let rec shift (d : int) (c : int) (t : tm) : tm =
     match t with
-    | Ind i -> if i >= c then Ind (i + d) else Ind i
-    | Lam s -> Lam (shift d (c + 1) s)
+    | Ind i      -> if i >= c then Ind (i + d) else Ind i
+    | Lam s      -> Lam (shift d (c + 1) s)
     | App (m, n) -> App (shift d c m, shift d c n)
+let rec unshift (d : int) (c : int) (t : tm) : tm =
+    match t with
+    | Ind i      -> if i >= c then Ind (i - d) else Ind i
+    | Lam s      -> Lam (unshift d (c + 1) s)
+    | App (m, n) -> App (unshift d c m, unshift d c n)
 (*
     Substitution of a term for an index.
 *)
@@ -31,25 +36,25 @@ let rec substitute (n : tm) (i : int) (m : tm) : tm =
             if i = j then n
             else if j > i then Ind (j - 1)
             else Ind j
-        | Lam t -> Lam (substitute (shift 1 1 n) (i + 1) t)
+        | Lam t      -> Lam (substitute (shift 1 1 n) (i + 1) t)
         | App (f, x) -> App (substitute n i f, substitute n i x)
 (*
     One-step reduction in normal order.
 *)
 let rec contract (t : tm) : tm option =
     match t with
-    | App (Lam m, n) -> Some (substitute n 1 m)
-    | App (f, x) ->
+    | App (Lam m, n) -> Some (unshift 1 1 (substitute n 1 m))
+    | App (f, x)     ->
         (match contract f with
         | Some f' -> Some (App (f', x))
-        | None ->
+        | None    ->
             (match contract x with
             | Some x' -> Some (App (f, x'))
-            | None -> None))
+            | None    -> None))
     | Lam s ->
         (match contract s with
         | Some s' -> Some (Lam s')
-        | None -> None)
+        | None    -> None)
     | Ind _  -> None
 (*
     Multi-step reduction function with step maximum to hedge against terms without nfs.
@@ -59,14 +64,14 @@ let normalize (t : tm) : tm =
         if n <= 0 then t else
             (match contract t with
             | Some t' -> f t' (n - 1)
-            | None -> t) in
+            | None    -> t) in
     f t 1000000
 (*
     Accommodates for abstractors being numbers.
 *)
 let rec nlam (n : int) (t : tm) : tm =
     match n <= 0 with
-    | true -> t
+    | true  -> t
     | false -> Lam (nlam (n - 1) t)
 (*
     Accommodates for abstractors being numbers in the other direction.
@@ -74,17 +79,17 @@ let rec nlam (n : int) (t : tm) : tm =
 let rec unlam (t : tm) : int * tm =
     match t with
     | Lam t' -> let n, s = unlam t' in n + 1, s
-    | t' -> 0, t'
+    | t'     -> 0, t'
 (*
     Turns a term into a string.
 *)
 let rec stringify (t : tm) : string =
     match t with
-    | Ind i -> string_of_int i
-    | Lam t' -> let n, s = unlam t' in (string_of_int (n + 1)) ^ "." ^ stringify s
+    | Ind i              -> string_of_int i
+    | Lam t'             -> let n, s = unlam t' in (string_of_int (n + 1)) ^ "." ^ stringify s
     | App (Ind i, Ind j) -> "(" ^ string_of_int i ^ " " ^ string_of_int j ^ ")" 
-    | App (Lam t', s) -> "(" ^ stringify (Lam t') ^ ") " ^ stringify s
-    | App (m, n) -> "(" ^ stringify m ^ " " ^ stringify n ^ ")"
+    | App (Lam t', s)    -> "(" ^ stringify (Lam t') ^ ") " ^ stringify s
+    | App (m, n)         -> "(" ^ stringify m ^ " " ^ stringify n ^ ")"
 (*
     Turns a term into a string.
 *)
@@ -101,11 +106,11 @@ type bookmark = string * int
 let snapshot (s : bookmark) : char option =
     match snd s < String.length (fst s) with
     | false -> None
-    | _ -> Some (fst s).[snd s]
+    | _     -> Some (fst s).[snd s]
 let snapshot' (s : bookmark) : char =
     match snd s < String.length (fst s) with
     | false -> (fst s).[String.length (fst s) - 1]
-    | _ -> (fst s).[snd s]
+    | _     -> (fst s).[snd s]
 (*
     Increments the index of a bookmark, tantamount to
     "consuming a character."
@@ -119,11 +124,11 @@ type 'a parser = bookmark -> (('a * bookmark), string) result
 let satisfy (p : char -> bool) : char parser =
     fun s ->
         match snapshot s with
-        | None -> Error (fmt "Index is out of bounds at %d." (snd s))
+        | None      -> Error (fmt "Index is out of bounds at %d." (snd s))
         | Some page ->
             match p page with
             | false -> Error (fmt "Failure at position %d." (snd s))
-            | true -> Ok ((page, advance s))
+            | true  -> Ok ((page, advance s))
 (*
     "Wraps" a value in a parser.
 *)
@@ -140,17 +145,17 @@ let ( <|> ) (p : 'a parser) (q : 'a parser) : 'a parser =
     fun s ->
         match p s with
         | Ok _ as result -> result
-        | Error _ -> q s
+        | Error _        -> q s
 (*
     Applies a parser-wrapped function to a parser.
 *)
 let ( <*> ) (f : ('a -> 'b) parser) (p : 'a parser) : 'b parser =
     fun s ->
         match f s with
-        | Error msg -> Error msg
+        | Error msg  -> Error msg
         | Ok (f', r) ->
             (match p r with
-            | Error msg -> Error msg
+            | Error msg   -> Error msg
             | Ok (p', r') -> Ok (f' p', r'))
 (*
     Map. Applies a pure function to a parser.
@@ -166,7 +171,7 @@ let ( << ) (p : 'a parser) (q : 'b parser) : 'a parser =
         | Error msg -> Error msg
         | Ok (a, r) ->
             (match q r with
-            | Error msg -> Error msg
+            | Error msg  -> Error msg
             | Ok (_, r') -> Ok (a, r'))
 (*
     Running (p >> b) means "run p, then run b. If both succeed, return the
@@ -186,7 +191,7 @@ let star (p : 'a parser) : ('a list) parser =
     fun s ->
         let rec f (xs : 'a list) (s : bookmark) =
             match p s with
-            | Error _ -> Ok (List.rev xs, s)
+            | Error _    -> Ok (List.rev xs, s)
             | Ok (x, s') -> f (x :: xs) s'
         in f [] s
 (*
@@ -217,7 +222,7 @@ let charms (c : char) : char parser = satisfy (Char.equal c)
 let rec among (cs' : char list) : char parser =
     match cs' with
     | c :: cs -> charms c <|> among cs
-    | [] -> fail
+    | []      -> fail
 (*
     Succeeds if a char is a whitespace character.
 *)
@@ -250,7 +255,7 @@ let parexp' : string parser =
                 match snapshot s with
                 | Some '(' -> 1
                 | Some ')' -> -1
-                | _ -> 0 in
+                | _        -> 0 in
             let rec f (n : int) (s : bookmark) : int =
                 let adv = advance s in
                 match n with
@@ -258,14 +263,14 @@ let parexp' : string parser =
                 | _ ->
                     match eof adv with
                     | Ok (_, _) -> -1
-                    | Error _ -> f (n + (sign adv)) adv
+                    | Error _   -> f (n + (sign adv)) adv
             in f 1 s in
         match charms '(' s with
         | Error msg -> Error msg
         | Ok (_, _) ->
             let n = right_paren s in
             match n <= 0 with
-            | true -> Error "Malformed parentheses."
+            | true  -> Error "Malformed parentheses."
             | false -> Ok (String.sub (fst s) (snd s) (n - (snd s) + 1), (fst s, n + 1))
 (*
     Succeeds on a parenthesized expression, consuming any whitespace
@@ -287,10 +292,10 @@ let collect_failures (p : char parser) (s' : bookmark) : char list =
     let rec f (cs : char list) (s : bookmark) : char list =
         match eof s with
         | Ok (_, _) -> cs
-        | Error _ ->
+        | Error _   ->
             (match plus (p <|> among cs) s with
             | Ok (xs, t) -> f cs t
-            | Error _ -> f ((snapshot' s) :: cs) (advance s)) in
+            | Error _    -> f ((snapshot' s) :: cs) (advance s)) in
     f [] s'
 (*
     Defines a collection of "syntactic sugar symbols" which
@@ -327,11 +332,11 @@ let expand : string parser =
         | c :: cs ->
             (match (g s' c) with
             | Some x -> f cs x
-            | None -> None)
+            | None   -> None)
         | [] -> Some s' in
     match f (collect_failures alphabet t) (fst t) with
     | Some x -> Ok (x, t)
-    | None -> Error "Syntax error."
+    | None   -> Error "Syntax error."
 (*
     "Peels" the outer layer of parentheses off a string
     if said string has such an outer layer of parentheses.
@@ -348,15 +353,15 @@ let parse : tm parser = fun s ->
     let rec f (s : bookmark) : tm =
         match (index' << charms '.') s with
         | Ok (s', t) -> nlam (int_of_string s') (f t)
-        | Error _ ->
+        | Error _    ->
             match (charms '\\' >> charms '.') s with
             | Ok (_, t) -> Lam (f t)
-            | Error _ ->
+            | Error _   ->
                 match (index' << eof) s with
                 | Ok (i, _) -> Ind (int_of_string i)
-                | Error _ ->
+                | Error _   ->
                     match plus (index <|> parexp) s with
-                    | Error _ -> failwith "Syntax error."
+                    | Error _    -> failwith "Syntax error."
                     | Ok (xs, _) ->
                         match List.map peel xs with
                         | x :: ys ->
@@ -377,8 +382,8 @@ type command =
 let rec starts_among (xs : string list) (s : string) : bool =
     match xs with
     | y :: ys -> String.starts_with ~prefix: y s || starts_among ys s
-    | [] -> false
+    | []      -> false
 let get_command (s : string) : command =
     match starts_among [":q"; ":quit"] s with
-    | true -> Quit
+    | true  -> Quit
     | false -> Full (process_full (s, 0))

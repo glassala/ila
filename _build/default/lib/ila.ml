@@ -1,5 +1,5 @@
 (*
-    Ila : a minimal λ-term reducer. Uses a naive implementation of
+    Ila : a minimal λ-term reducer with REPL. Uses a naive implementation of
     untyped λ-calculus (i.e. a substitution-based as opposed to
     an environment/closure-based approach) with user-facing de Bruijn indices.
     
@@ -15,13 +15,18 @@ type tm =
     | Lam of tm
     | App of tm * tm
 (*
-    Index-shifting function. Handles free variables.
+    Index-shifting function.
 *)
 let rec shift (d : int) (c : int) (t : tm) : tm =
     match t with
-    | Ind i -> if i >= c then Ind (i + d) else Ind i
-    | Lam s -> Lam (shift d (c + 1) s)
+    | Ind i      -> if i >= c then Ind (i + d) else Ind i
+    | Lam s      -> Lam (shift d (c + 1) s)
     | App (m, n) -> App (shift d c m, shift d c n)
+let rec unshift (d : int) (c : int) (t : tm) : tm =
+    match t with
+    | Ind i      -> if i >= c then Ind (i - d) else Ind i
+    | Lam s      -> Lam (unshift d (c + 1) s)
+    | App (m, n) -> App (unshift d c m, unshift d c n)
 (*
     Substitution of a term for an index.
 *)
@@ -38,7 +43,7 @@ let rec substitute (n : tm) (i : int) (m : tm) : tm =
 *)
 let rec contract (t : tm) : tm option =
     match t with
-    | App (Lam m, n) -> Some (substitute n 1 m)
+    | App (Lam m, n) -> Some (unshift 1 1 (substitute n 1 m))
     | App (f, x) ->
         (match contract f with
         | Some f' -> Some (App (f', x))
@@ -71,9 +76,9 @@ let rec nlam (n : int) (t : tm) : tm =
 (*
     Accommodates for abstractors being numbers in the other direction.
 *)
-let rec unlambda (t : tm) : int * tm =
+let rec unlam (t : tm) : int * tm =
     match t with
-    | Lam t' -> let n, s = unlambda t' in n + 1, s
+    | Lam t' -> let n, s = unlam t' in n + 1, s
     | t' -> 0, t'
 (*
     Turns a term into a string.
@@ -81,8 +86,7 @@ let rec unlambda (t : tm) : int * tm =
 let rec stringify (t : tm) : string =
     match t with
     | Ind i -> string_of_int i
-    | Lam t' -> let n, s = unlambda t' in
-        (string_of_int (n + 1)) ^ "." ^ stringify s
+    | Lam t' -> let n, s = unlam t' in (string_of_int (n + 1)) ^ "." ^ stringify s
     | App (Ind i, Ind j) -> "(" ^ string_of_int i ^ " " ^ string_of_int j ^ ")" 
     | App (Lam t', s) -> "(" ^ stringify (Lam t') ^ ") " ^ stringify s
     | App (m, n) -> "(" ^ stringify m ^ " " ^ stringify n ^ ")"
